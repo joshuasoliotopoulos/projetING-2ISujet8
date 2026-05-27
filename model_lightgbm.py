@@ -31,7 +31,7 @@ def hit_rate(returns):
     return np.mean(returns > 0)
 
 # ── 1. Chargement ─────────────────────────────────────────────────────────────
-from traitement_de_donnee3 import main, prepare_datasets
+from traitement_de_donnee import main, prepare_datasets
 
 
 fill_actions,fill_sectors,fill_bourses=main()
