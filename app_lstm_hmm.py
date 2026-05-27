@@ -13,9 +13,7 @@ MODEL_DIR = "./models"
 st.set_page_config(page_title="Dashboard Actions", layout="wide")
 st.title("📈 Dashboard Actions — LSTM + HMM")
 
-# =========================
-# SIDEBAR
-# =========================
+# ----- Sidebar ----------------------------------------------------
 
 with st.sidebar:
     st.header("⚙️ Paramètres")
@@ -23,14 +21,10 @@ with st.sidebar:
     ticker = st.selectbox("Choisir une action", tickers)
     st.caption(f"Données disponibles jusqu'au {pd.to_datetime(df_all['Date'].max()).strftime('%d/%m/%Y')}")
 
-# =========================
-# LOADERS
-# =========================
+# ----- LOADERS ---------------------------------------------------
 
 def load_model(ticker: str):
     path = os.path.join(MODEL_DIR, f"{ticker}_lstm.pt")
-    if not os.path.exists(path):
-        return None
     model = LSTMModel(input_size=len(FEATURES)).to(DEVICE)
     model.load_state_dict(torch.load(path, map_location=DEVICE))
     model.eval()
@@ -38,21 +32,15 @@ def load_model(ticker: str):
 
 def load_scaler(ticker: str):
     path = os.path.join(MODEL_DIR, f"{ticker}_scaler.pkl")
-    if not os.path.exists(path):
-        return None
     with open(path, "rb") as f:
         return pickle.load(f)
 
 def load_hmm(ticker: str):
     path = os.path.join(MODEL_DIR, f"{ticker}_hmm.pkl")
-    if not os.path.exists(path):
-        return None
     with open(path, "rb") as f:
         return pickle.load(f)
 
-# =========================
-# PREDICT
-# =========================
+# ----- PREDICT ------------------------------------------------
 
 def predict(ticker: str):
     model  = load_model(ticker)
@@ -61,8 +49,7 @@ def predict(ticker: str):
 
     if model is None or scaler is None:
         return None
-
-    # Filtrer par Ticker_name (vrais noms)
+    
     data = df_all[df_all["Ticker_name"] == ticker].copy().sort_values("Date")
 
     if len(data) < SEQUENCE_LEN:
@@ -88,7 +75,6 @@ def predict(ticker: str):
     with torch.no_grad():
         forecast = model(X).cpu().numpy()[0]
 
-    # Inverse-scale Close (index 3)
     close_min = scaler.data_min_[3]
     close_max = scaler.data_max_[3]
     forecast  = forecast * (close_max - close_min) + close_min
@@ -107,15 +93,13 @@ def predict(ticker: str):
 
     return current, forecast, data, regime
 
-# =========================
-# RUN
-# =========================
+# ------ RUN -----------------------------------------------------
 
 with st.spinner("Chargement..."):
     res = predict(ticker)
 
 if res is None:
-    st.warning("⚠️ Modèle ou données insuffisantes pour ce ticker.")
+    st.warning("Modèle ou données insuffisantes pour ce ticker.")
     st.stop()
 
 current, forecast, hist, regime = res
@@ -123,9 +107,7 @@ current, forecast, hist, regime = res
 variation      = (forecast[0] - current) / current * 100
 last_data_date = pd.to_datetime(hist["Date"].iloc[-1]).strftime("%d/%m/%Y")
 
-# =========================
-# METRICS
-# =========================
+# ----- MÉTRIQUES -----------------------------------------------
 
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Close actuel",    f"{current:.2f}")
@@ -136,9 +118,7 @@ c5.metric("Dernière donnée", last_data_date)
 
 st.divider()
 
-# =========================
-# GRAPH
-# =========================
+# ----- GRAPHE --------------------------------------------------
 
 fig = go.Figure()
 
@@ -194,9 +174,7 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 
-# =========================
-# TABLE
-# =========================
+# ----- TABLEAU ---------------------------------------------------------
 
 st.subheader("📋 Prévisions détaillées")
 
