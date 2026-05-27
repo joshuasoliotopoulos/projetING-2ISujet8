@@ -12,7 +12,6 @@ Created on Wed Mar 25 22:30:18 2026
 @author: grabe
 """
 
-import os
 import warnings
 import pandas as pd
 import yfinance as yf
@@ -646,20 +645,6 @@ def download_VIX():
     print(f"  {len(vix_close)} trading days fetched.")
     return vix_close
 
-def sanitize_name(ticker: str) -> str:
-    table = str.maketrans({
-        ".": "_",
-        "-": "_",
-        "^": "",
-        " ": "_"
-    })
-    return ticker.translate(table)
-
-
-        
-
-    
-
         
 # ─── CORE PROCESSING ─────────────────────────────────────────────────────────
 # ─── Arboraissance ─────────────────────────────────────────────────────────
@@ -865,7 +850,7 @@ def print_footer(indices):
 
 def main():
     CONFIG = {
-        "run_index": None, #=====> remplacer par une bourse spécifique == exemple: "cac40" 
+        "run_index": None,
     }
 
     gestion_indices(secteur, INDICES)
