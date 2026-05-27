@@ -12,9 +12,9 @@ import joblib
 import plotly.express as px
 
 # ── Chargement ─────────────────────────────
-df = pd.read_csv("/Users/joshuasoliotopoulos/Downloads/future_results.csv")  # ou ton dataset enrichi
-model = joblib.load("/Users/joshuasoliotopoulos/Downloads/model_final.pkl")
-scaler = joblib.load("/Users/joshuasoliotopoulos/Downloads/scaler.pkl")
+df = pd.read_csv("./future_results.csv")  # ou ton dataset enrichi
+model = joblib.load("./model_final.pkl")
+scaler = joblib.load("./scaler.pkl")
 
 st.title("📈 Dashboard Actions — Prédiction J+1")
 
