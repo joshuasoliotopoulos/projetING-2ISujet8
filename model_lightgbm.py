@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-from scipy import stats
 import numpy as np
 import lightgbm as lgb
 import matplotlib.pyplot as plt
@@ -12,10 +11,6 @@ import joblib
 import os
 import warnings
 warnings.filterwarnings("ignore")
-
-# =========================
-# METRICS FINANCIÈRES
-# =========================
 
 def sharpe_ratio(returns, rf=0.0):
     returns = np.array(returns)
@@ -36,16 +31,19 @@ def hit_rate(returns):
     return np.mean(returns > 0)
 
 # ── 1. Chargement ─────────────────────────────────────────────────────────────
-from traitement_de_donnee import prepare_datasets
+from traitement_de_donnee3 import main, prepare_datasets
 
-fill_indice, fill_df, fill_bourse, ticker_encoder = prepare_datasets()
 
-df = fill_df.copy()
+fill_actions,fill_sectors,fill_bourses=main()
+
+df = fill_actions.copy()
+
+fill_sector, fill_action, fill_bourse, ticker_encoder = prepare_datasets()
 
 # ── 2. Filtre jours de trading ────────────────────────────────────────────────
-print(f"📊 Lignes avant filtre is_trading_day : {len(df)}")
+print(f"Lignes avant filtre is_trading_day : {len(df)}")
 df = df[df["is_trading_day"] == 1].copy()
-print(f"📊 Lignes après filtre is_trading_day : {len(df)}\n")
+print(f"Lignes après filtre is_trading_day : {len(df)}\n")
 df = df.sort_values(["Ticker", "Date"]).reset_index(drop=True)
 
 # ── 3. Target + lags ──────────────────────────────────────────────────────────
@@ -87,59 +85,50 @@ for file in ["scaler.pkl", "important_features.pkl", "model_final.pkl", "best_pa
         os.remove(file)
 
 # ── 4. Boîte à moustaches AVANT normalisation ─────────────────────────────────
-if not os.path.exists("boxplots.png"):
-    print("📊 Génération boîtes à moustaches avant normalisation...\n")
-    numeric_cols = [c for c in ["Close", "Volume", "RSI", "MACD", "Momentum",
-                                "Volatility_20d", "BB_Upper", "BB_Lower",
-                                "MA20", "MA50"] if c in df.columns]
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-    axes = axes.flatten()
-    for i, col in enumerate(numeric_cols):
-        if i < len(axes):
-            axes[i].boxplot(df[col].dropna(), patch_artist=True,
-                            boxprops=dict(facecolor="#4C72B0", color="white"),
-                            medianprops=dict(color="orange", linewidth=2),
-                            whiskerprops=dict(color="white"),
-                            capprops=dict(color="white"),
-                            flierprops=dict(marker="o", color="red", alpha=0.3))
-            axes[i].set_title(col, color="white", fontsize=11)
-            axes[i].set_facecolor("#1e1e1e")
-            axes[i].tick_params(colors="white")
-            for spine in axes[i].spines.values():
-                spine.set_edgecolor("#444")
-    for j in range(len(numeric_cols), len(axes)):
-        axes[j].set_visible(False)
-    fig.patch.set_facecolor("#1e1e1e")
-    fig.suptitle("Boîtes à moustaches AVANT RobustScaler",
-                 color="white", fontsize=14)
-    plt.tight_layout()
-    plt.savefig("boxplots.png", dpi=150, bbox_inches="tight",
+print("Génération boîtes à moustaches avant normalisation...\n")
+numeric_cols = [c for c in ["Close", "Volume", "RSI", "MACD", "Momentum",
+                            "Volatility_20d", "BB_Upper", "BB_Lower",
+                            "MA20", "MA50"] if c in df.columns]
+fig, axes = plt.subplots(2, 5, figsize=(20, 8))
+axes = axes.flatten()
+for i, col in enumerate(numeric_cols):
+    if i < len(axes):
+        axes[i].boxplot(df[col].dropna(), patch_artist=True,
+                        boxprops=dict(facecolor="#4C72B0", color="white"),
+                        medianprops=dict(color="orange", linewidth=2),
+                        whiskerprops=dict(color="white"),
+                        capprops=dict(color="white"),
+                        flierprops=dict(marker="o", color="red", alpha=0.3))
+        axes[i].set_title(col, color="white", fontsize=11)
+        axes[i].set_facecolor("#1e1e1e")
+        axes[i].tick_params(colors="white")
+        for spine in axes[i].spines.values():
+            spine.set_edgecolor("#444")
+for j in range(len(numeric_cols), len(axes)):
+    axes[j].set_visible(False)
+fig.patch.set_facecolor("#1e1e1e")
+fig.suptitle("Boîtes à moustaches AVANT RobustScaler",
+             color="white", fontsize=14)
+plt.tight_layout()
+plt.savefig("boxplots.png", dpi=150, bbox_inches="tight",
                 facecolor="#1e1e1e")
-    plt.show()
-    print("✅ Sauvegardé → boxplots.png\n")
-else:
-    print("⏩ boxplots.png déjà existant — génération ignorée\n")
+plt.show()
 
 # ── 5. Matrice de corrélation ─────────────────────────────────────────────────
-if not os.path.exists("correlation_matrix.png"):
-    print("Génération matrice de corrélation...\n")
-    corr_cols = [c for c in ["Close", "Volume", "RSI", "MACD", "Momentum",
+print("Génération matrice de corrélation...\n")
+corr_cols = [c for c in ["Close", "Volume", "RSI", "MACD", "Momentum",
                               "Volatility_20d", "MA20", "MA50", "BB_Upper",
-                              "BB_Lower", "VIX_Close", "target_close"]
-                 if c in df.columns]
-    corr_matrix = df[corr_cols].corr()
-    fig, ax = plt.subplots(figsize=(14, 10))
-    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-    sns.heatmap(corr_matrix, mask=mask, annot=True, fmt=".2f",
-                cmap="coolwarm", center=0, vmin=-1, vmax=1,
-                linewidths=0.5, ax=ax, annot_kws={"size": 8})
-    ax.set_title("Matrice de corrélation", fontsize=14, pad=15)
-    plt.tight_layout()
-    plt.savefig("correlation_matrix.png", dpi=150, bbox_inches="tight")
-    plt.show()
-    print("✅ Sauvegardé → correlation_matrix.png\n")
-else:
-    print("⏩ correlation_matrix.png déjà existant — génération ignorée\n")
+                              "BB_Lower", "VIX_Close", "target_close"] if c in df.columns]
+corr_matrix = df[corr_cols].corr()
+fig, ax = plt.subplots(figsize=(14, 10))
+mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
+sns.heatmap(corr_matrix, mask=mask, annot=True, fmt=".2f",
+            cmap="coolwarm", center=0, vmin=-1, vmax=1,
+            linewidths=0.5, ax=ax, annot_kws={"size": 8})
+ax.set_title("Matrice de corrélation", fontsize=14, pad=15)
+plt.tight_layout()
+plt.savefig("correlation_matrix.png", dpi=150, bbox_inches="tight")
+plt.show()
 
 # ── 6. Features / Target ──────────────────────────────────────────────────────
 X = df.drop(columns=["Date", "target_close"])
@@ -147,71 +136,57 @@ X = X.select_dtypes(include=[np.number])
 y = np.log1p(df["target_close"])
 
 # ── 7. Normalisation RobustScaler ─────────────────────────────────────────────
-if os.path.exists("scaler.pkl"):
-    print("⏩ Scaler existant chargé\n")
-    scaler   = joblib.load("scaler.pkl")
-    X_scaled = scaler.transform(X)
-else:
-    print("🔄 Calcul du RobustScaler...\n")
-    scaler   = RobustScaler()
-    X_scaled = scaler.fit_transform(X)
-    joblib.dump(scaler, "scaler.pkl")
+print("Calcul du RobustScaler...\n")
+scaler   = RobustScaler()
+X_scaled = scaler.fit_transform(X)
+joblib.dump(scaler, "scaler.pkl")
 
 X_scaled = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
-print(f"✅ Données normalisées — shape : {X_scaled.shape}\n")
+print(f"Données normalisées — shape : {X_scaled.shape}\n")
 
 # ── 8. Boîte à moustaches APRÈS normalisation ─────────────────────────────────
-if not os.path.exists("boxplots_scaled.png"):
-    print("Génération boîtes à moustaches après normalisation...\n")
-    numeric_cols_scaled = [c for c in ["Close", "Volume", "RSI", "MACD",
+print("Génération boîtes à moustaches après normalisation...\n")
+numeric_cols_scaled = [c for c in ["Close", "Volume", "RSI", "MACD",
                                         "Momentum", "Volatility_20d",
-                                        "BB_Upper", "BB_Lower", "MA20", "MA50"]
-                           if c in X_scaled.columns]
-    fig, axes = plt.subplots(2, 5, figsize=(20, 8))
-    axes = axes.flatten()
-    for i, col in enumerate(numeric_cols_scaled):
-        if i < len(axes):
-            data = X_scaled[col].dropna()
-            axes[i].boxplot(data, patch_artist=True,
+                                        "BB_Upper", "BB_Lower", "MA20", "MA50"] if c in X_scaled.columns]
+fig, axes = plt.subplots(2, 5, figsize=(20, 8))
+axes = axes.flatten()
+for i, col in enumerate(numeric_cols_scaled):
+    if i < len(axes):
+        data = X_scaled[col].dropna()
+        axes[i].boxplot(data, patch_artist=True,
                             boxprops=dict(facecolor="#55a868", color="white"),
                             medianprops=dict(color="orange", linewidth=2),
                             whiskerprops=dict(color="white"),
                             capprops=dict(color="white"),
                             flierprops=dict(marker="o", color="red", alpha=0.3))
-            axes[i].axhline(y=0, color="orange", linestyle="--",
+        axes[i].axhline(y=0, color="orange", linestyle="--",
                             linewidth=1, alpha=0.5)
-            axes[i].set_title(
+        axes[i].set_title(
                 f"{col}\nmed={data.median():.2f} | iqr={data.quantile(0.75) - data.quantile(0.25):.2f}",
                 color="white", fontsize=9
             )
-            axes[i].set_facecolor("#1e1e1e")
-            axes[i].tick_params(colors="white")
-            for spine in axes[i].spines.values():
-                spine.set_edgecolor("#444")
-    for j in range(len(numeric_cols_scaled), len(axes)):
-        axes[j].set_visible(False)
-    fig.patch.set_facecolor("#1e1e1e")
-    fig.suptitle("Boîtes à moustaches APRÈS RobustScaler",
+        axes[i].set_facecolor("#1e1e1e")
+        axes[i].tick_params(colors="white")
+        for spine in axes[i].spines.values():
+            spine.set_edgecolor("#444")
+for j in range(len(numeric_cols_scaled), len(axes)):
+    axes[j].set_visible(False)
+fig.patch.set_facecolor("#1e1e1e")
+fig.suptitle("Boîtes à moustaches APRÈS RobustScaler",
                  color="white", fontsize=14)
-    plt.tight_layout()
-    plt.savefig("boxplots_scaled.png", dpi=150, bbox_inches="tight",
+plt.tight_layout()
+plt.savefig("boxplots_scaled.png", dpi=150, bbox_inches="tight",
                 facecolor="#1e1e1e")
-    plt.show()
-    print("✅ Sauvegardé → boxplots_scaled.png\n")
-else:
-    print("⏩ boxplots_scaled.png déjà existant — génération ignorée\n")
+plt.show()
 
 # ── 9. Split temporel ─────────────────────────────────────────────────────────
 tscv = TimeSeriesSplit(n_splits=3)
 
 # ── 10. Entraînement initial (feature selection) ──────────────────────────────
-if os.path.exists("important_features.pkl"):
-    print("⏩ Features importantes déjà calculées — chargement\n")
-    important_features = joblib.load("important_features.pkl")
-else:
-    print("🔄 Entraînement initial pour sélection des features...\n")
+print(" Entraînement initial pour sélection des features...\n")
 
-    model_init = lgb.LGBMRegressor(
+model_init = lgb.LGBMRegressor(
         n_estimators=500,
         learning_rate=0.05,
         num_leaves=63,
@@ -222,57 +197,53 @@ else:
         verbosity=-1
     )
 
-    scores_mae_init, scores_r2_init, scores_rmse_init = [], [], []
+scores_mae_init, scores_r2_init, scores_rmse_init = [], [], []
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
-        X_train, X_val = X_scaled.iloc[train_idx], X_scaled.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+for fold, (train_idx, val_idx) in enumerate(tscv.split(X_scaled)):
+    X_train, X_val = X_scaled.iloc[train_idx], X_scaled.iloc[val_idx]
+    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-        model_init.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)]
+model_init.fit(
+    X_train, y_train,
+    eval_set=[(X_val, y_val)],
+    callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)]
         )
 
-        preds      = np.expm1(model_init.predict(X_val))
-        y_val_real = np.expm1(y_val)
+preds      = np.expm1(model_init.predict(X_val))
+y_val_real = np.expm1(y_val)
 
-        scores_mae_init.append(mean_absolute_error(y_val_real, preds))
-        scores_r2_init.append(r2_score(y_val_real, preds))
-        scores_rmse_init.append(np.sqrt(mean_squared_error(y_val_real, preds)))
+scores_mae_init.append(mean_absolute_error(y_val_real, preds))
+scores_r2_init.append(r2_score(y_val_real, preds))
+scores_rmse_init.append(np.sqrt(mean_squared_error(y_val_real, preds)))
         
-        print(f"Fold {fold+1} — MAE: {scores_mae_init[-1]:.2f} | RMSE: {scores_rmse_init[-1]:.2f} | R²: {scores_r2_init[-1]:.4f}")
+print(f"Fold {fold+1} — MAE: {scores_mae_init[-1]:.2f} | RMSE: {scores_rmse_init[-1]:.2f} | R²: {scores_r2_init[-1]:.4f}")
 
-    print(f"✅ RMSE moyen (initial) : {np.mean(scores_rmse_init):.2f}")
-    print(f"\n✅ MAE moyen (initial) : {np.mean(scores_mae_init):.2f}")
-    print(f"✅ R² moyen  (initial) : {np.mean(scores_r2_init):.4f}")
+print(f"RMSE moyen (initial) : {np.mean(scores_rmse_init):.2f}")
+print(f"\n MAE moyen (initial) : {np.mean(scores_mae_init):.2f}")
+print(f"R² moyen  (initial) : {np.mean(scores_r2_init):.4f}")
 
-    importance = pd.DataFrame({
-        "feature"    : X_scaled.columns,
-        "importance" : model_init.feature_importances_
+importance = pd.DataFrame({
+    "feature"    : X_scaled.columns,
+    "importance" : model_init.feature_importances_
     }).sort_values("importance", ascending=False)
 
-    print("\n📊 Top 20 features :")
-    print(importance.head(20))
+print("\n Top 20 features :")
+print(importance.head(20))
 
-    threshold          = importance["importance"].sum() * 0.001
-    important_features = importance[importance["importance"] > threshold]["feature"].tolist()
+threshold = importance["importance"].sum() * 0.001
+important_features = importance[importance["importance"] > threshold]["feature"].tolist()
 
-    print(f"\n🗑️  Features droppées   : {len(X_scaled.columns) - len(important_features)}")
-    print(f"✅ Features conservées : {len(important_features)}")
+print(f"\nFeatures droppées   : {len(X_scaled.columns) - len(important_features)}")
+print(f" Features conservées : {len(important_features)}")
 
-    joblib.dump(important_features, "important_features.pkl")
+joblib.dump(important_features, "important_features.pkl")
 
 X_reduced = X_scaled[important_features]
 
 # ── 11. RandomizedSearchCV ────────────────────────────────────────────────────
-if os.path.exists("best_params.pkl"):
-    print("⏩ Meilleurs hyperparamètres déjà calculés — chargement\n")
-    best_params = joblib.load("best_params.pkl")
-else:
-    print("🔍 Recherche des meilleurs hyperparamètres...\n")
+print(" Recherche des meilleurs hyperparamètres...\n")
 
-    param_distributions = {
+param_distributions = {
         "n_estimators"      : [200, 300, 500, 700, 1000],
         "learning_rate"     : [0.01, 0.03, 0.05, 0.08, 0.1],
         "num_leaves"        : [31, 63, 95, 127, 255],
@@ -284,9 +255,9 @@ else:
         "reg_lambda"        : [0.0, 0.01, 0.1, 1.0],
     }
 
-    tscv_search = TimeSeriesSplit(n_splits=3)
+tscv_search = TimeSeriesSplit(n_splits=3)
 
-    search = RandomizedSearchCV(
+search = RandomizedSearchCV(
         estimator=lgb.LGBMRegressor(random_state=42, n_jobs=-1, verbosity=-1),
         param_distributions=param_distributions,
         n_iter=20,
@@ -297,62 +268,48 @@ else:
         verbose=2
     )
 
-    search.fit(X_reduced, y)
+search.fit(X_reduced, y)
 
-    best_params = search.best_params_
-    best_params["random_state"] = 42
-    best_params["n_jobs"]       = -1
-    best_params["verbosity"]    = -1
+best_params = search.best_params_
+best_params["random_state"] = 42
+best_params["n_jobs"]       = -1
+best_params["verbosity"]    = -1
 
-    print(f"\n✅ Meilleurs hyperparamètres : {best_params}")
-    print(f"✅ Meilleur MAE : {-search.best_score_:.4f}")
+print(f"\n Meilleurs hyperparamètres : {best_params}")
+print(f" Meilleur MAE : {-search.best_score_:.4f}")
 
-    joblib.dump(best_params, "best_params.pkl")
+joblib.dump(best_params, "best_params.pkl")
 
 # ── 12. Entraînement final ─────────────────────────────────────────────────────
-if os.path.exists("model_final.pkl"):
-    print("⏩ Modèle final déjà entraîné — chargement\n")
-    model_final = joblib.load("model_final.pkl")
-    scores_mae_final  = []
-    scores_r2_final   = []
-    scores_rmse_final = []
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_reduced)):
-        preds      = np.expm1(model_final.predict(X_reduced.iloc[val_idx]))
-        y_val_real = np.expm1(y.iloc[val_idx])
-        scores_mae_final.append(mean_absolute_error(y_val_real, preds))
-        scores_r2_final.append(r2_score(y_val_real, preds))
-        scores_rmse_final.append(np.sqrt(mean_squared_error(y_val_real, preds)))
-else:
-    print("\n🔄 Entraînement final...\n")
+print("\n Entraînement final...\n")
+model_final = lgb.LGBMRegressor(**best_params)
 
-    model_final = lgb.LGBMRegressor(**best_params)
+scores_mae_final, scores_r2_final, scores_rmse_final = [], [], []
 
-    scores_mae_final, scores_r2_final, scores_rmse_final = [], [], []
+for fold, (train_idx, val_idx) in enumerate(tscv.split(X_reduced)):
+    X_train, X_val = X_reduced.iloc[train_idx], X_reduced.iloc[val_idx]
+    y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
-    for fold, (train_idx, val_idx) in enumerate(tscv.split(X_reduced)):
-        X_train, X_val = X_reduced.iloc[train_idx], X_reduced.iloc[val_idx]
-        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+    model_final.fit(
+        X_train, y_train,
+        eval_set=[(X_val, y_val)],
+        callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)]
+    )
 
-        model_final.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            callbacks=[lgb.early_stopping(50), lgb.log_evaluation(100)]
-        )
+    preds      = np.expm1(model_final.predict(X_val))
+    y_val_real = np.expm1(y_val)
 
-        preds      = np.expm1(model_final.predict(X_val))
-        y_val_real = np.expm1(y_val)
-
-        scores_mae_final.append(mean_absolute_error(y_val_real, preds))
-        scores_r2_final.append(r2_score(y_val_real, preds))
-        scores_rmse_final.append(np.sqrt(mean_squared_error(y_val_real, preds)))
+    scores_mae_final.append(mean_absolute_error(y_val_real, preds))
+    scores_r2_final.append(r2_score(y_val_real, preds))
+    scores_rmse_final.append(np.sqrt(mean_squared_error(y_val_real, preds)))
         
-        print(f"Fold {fold+1} — MAE: {scores_mae_final[-1]:.2f} | RMSE: {scores_rmse_final[-1]:.2f} | R²: {scores_r2_final[-1]:.4f}")
+    print(f"Fold {fold+1} — MAE: {scores_mae_final[-1]:.2f} | RMSE: {scores_rmse_final[-1]:.2f} | R²: {scores_r2_final[-1]:.4f}")
 
-    print(f"✅ RMSE moyen (final) : {np.mean(scores_rmse_final):.2f}")
-    print(f"\n✅ MAE moyen (final) : {np.mean(scores_mae_final):.2f}")
-    print(f"✅ R² moyen  (final) : {np.mean(scores_r2_final):.4f}")
+print(f"RMSE moyen (final) : {np.mean(scores_rmse_final):.2f}")
+print(f"\n MAE moyen (final) : {np.mean(scores_mae_final):.2f}")
+print(f" R² moyen  (final) : {np.mean(scores_r2_final):.4f}")
 
-    joblib.dump(model_final, "model_final.pkl")
+joblib.dump(model_final, "model_final.pkl")
 
 # ── 13. Graphiques R² et MAE ──────────────────────────────────────────────────
 folds = list(range(1, len(scores_mae_final) + 1))
@@ -401,17 +358,12 @@ plt.tight_layout()
 plt.savefig("performance_folds.png", dpi=150, bbox_inches="tight",
             facecolor="#1e1e1e")
 plt.show()
-print("✅ Sauvegardé → performance_folds.png\n")
 
 # ── 14. Prédictions sur le dernier fold ───────────────────────────────────────
 train_idx, val_idx = list(tscv.split(X_reduced))[-1]
 
 y_val_real = np.expm1(y.iloc[val_idx])
 preds_real = np.expm1(model_final.predict(X_reduced.iloc[val_idx]))
-
-# =========================
-# 📊 RETURNS (strategy simple)
-# =========================
 
 market_returns = np.diff(y_val_real.values, prepend=y_val_real.values[0]) / y_val_real.values
 
@@ -439,19 +391,15 @@ results = pd.DataFrame({
     "Erreur_%": np.abs(y_val_real.values - preds_real) / y_val_real.values * 100
 })
 
-print("\n📋 Résultats sur le dernier fold :")
+print("\n Résultats sur le dernier fold :")
 print(results.head(20))
-
-# =========================
-# 📊 FINANCIAL METRICS
-# =========================
 
 sharpe = sharpe_ratio(strategy_returns)
 mdd    = max_drawdown(np.cumprod(1 + strategy_returns))
 hit    = hit_rate(strategy_returns)
 
 print("\n==============================")
-print("📊 STRATEGY PERFORMANCE")
+print(" STRATEGY PERFORMANCE")
 print("==============================")
 print(f"Sharpe Ratio : {sharpe:.4f}")
 print(f"Max Drawdown : {mdd:.4f}")
@@ -481,7 +429,6 @@ plt.tight_layout()
 plt.savefig("close_reel_vs_predit.png", dpi=150, bbox_inches="tight",
             facecolor="#1e1e1e")
 plt.show()
-print("✅ Sauvegardé → close_reel_vs_predit.png\n")
 
 # ── 16. Graphique erreur % ────────────────────────────────────────────────────
 fig, ax = plt.subplots(figsize=(14, 4))
@@ -507,7 +454,6 @@ plt.tight_layout()
 plt.savefig("erreur_par_jour.png", dpi=150, bbox_inches="tight",
             facecolor="#1e1e1e")
 plt.show()
-print("✅ Sauvegardé → erreur_par_jour.png\n")
 
 # ── 17. Prédiction J+1 ────────────────────────────────────────────────────────
 last_known        = df.sort_values("Date").groupby("Ticker").last().reset_index()
@@ -516,7 +462,7 @@ last_known_scaled = pd.DataFrame(last_known_scaled, columns=X.columns)
 
 missing = [f for f in important_features if f not in last_known_scaled.columns]
 if missing:
-    print(f"⚠️  Features manquantes pour J+1 : {missing}")
+    print(f" Features manquantes pour J+1 : {missing}")
 else:
     X_future = last_known_scaled[important_features]
     
@@ -549,7 +495,6 @@ else:
     print(future_results)
 
     future_results.to_csv("future_results.csv", index=False)
-    print("\n💾 Prédictions sauvegardées → future_results.csv")
 
 # ── 18. Sauvegarde finale ─────────────────────────────────────────────────────
 joblib.dump(model_final,        "model_final.pkl")
@@ -557,4 +502,4 @@ joblib.dump(important_features, "important_features.pkl")
 joblib.dump(ticker_encoder,     "ticker_encoder.pkl")
 joblib.dump(scaler,             "scaler.pkl")
 
-print("\n💾 Modèle, scaler et encodeur sauvegardés.")
+print("\n Modèle, scaler et encodeur sauvegardés.")
