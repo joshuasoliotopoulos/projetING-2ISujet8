@@ -2,22 +2,19 @@
 
 import os
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
 import pickle
-from scipy import stats
 
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from torch.utils.data import DataLoader, TensorDataset
 from hmmlearn.hmm import GaussianHMM
 
-from traitement_de_donnee import prepare_datasets
+from traitement_de_donnee import prepare_datasets, main
 
-# =========================
-# FINANCIAL METRICS
-# =========================
+
+# ------ Métriques financières ------------------------------------
 
 def sharpe_ratio(returns, rf=0.0):
     returns = np.array(returns)
@@ -38,11 +35,14 @@ def hit_rate(returns):
     returns = np.array(returns)
     return np.mean(returns > 0)
 
-# =========================
-# CONFIG
-# =========================
 
-fill_indice, fill_df, fill_bourse, ticker_encoder = prepare_datasets()
+# -------- CONFIG --------------------------------------------------
+
+
+fill_sector, fill_action, fill_bourse, ticker_encoder = prepare_datasets()
+
+fill_actions,fill_sectors,fill_bourses=main()
+
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -56,23 +56,19 @@ FEATURES = [
     "MA20", "MA50", "RSI", "MACD", "Volatility_20d"
 ]
 
-# =========================
-# DATA CLEAN
-# =========================
+# ----- DATA CLEAN ------------------------------------------------------
 
-df_all = fill_df.copy()
+df_all = fill_actions.copy()
 df_all["Ticker"] = df_all["Ticker"].astype(str).str.upper().str.strip()
 
 
 tickers = sorted(df_all["Ticker"].unique())
 
-print(f"✅ Tickers: {len(tickers)}")
+print(f"Tickers: {len(tickers)}")
 print("Exemple tickers:", tickers[:10])
 
 
-# =========================
-# GLOBAL STORAGE (IMPORTANT)
-# =========================
+# ----- Stockage GLOBAL prédictions + retours ---------------------------
 
 all_preds = []
 all_true = []
@@ -81,9 +77,7 @@ all_strategy_returns = []
 all_market_returns = []
 
 
-# =========================
-# MODEL
-# =========================
+# ----- LSTM -------------------------------------------------------------
 
 class LSTMModel(nn.Module):
     def __init__(self, input_size, hidden=128, layers=2, dropout=0.2):
@@ -104,9 +98,7 @@ class LSTMModel(nn.Module):
         return self.fc(out[:, -1])
 
 
-# =========================
-# SEQUENCES
-# =========================
+# ----- SEQUENCES -------------------------------------------------------
 
 def make_sequences(data):
     X, y = [], []
@@ -118,37 +110,28 @@ def make_sequences(data):
     return np.array(X), np.array(y)
 
 
-# =========================
-# HMM
-# =========================
+# ---- HMM ------------------------------------------------------------
 
 def train_hmm(df):
-    try:
-        close = df["Close"].ffill().bfill().fillna(0)
-        returns = close.pct_change().fillna(0).values.reshape(-1, 1)
+    close = df["Close"].ffill().bfill().fillna(0)
+    returns = close.pct_change().fillna(0).values.reshape(-1, 1)
 
-        if len(returns) < 100 or returns.std() < 1e-6:
-            return None
-
-        returns = StandardScaler().fit_transform(returns)
-
-        hmm = GaussianHMM(
-            n_components=2,
-            covariance_type="diag",
-            n_iter=50,
-            random_state=42
-        )
-
-        hmm.fit(returns)
-        return hmm
-
-    except:
+    if len(returns) < 100 or returns.std() < 1e-6:
         return None
 
+    returns = StandardScaler().fit_transform(returns)
 
-# =========================
-# TRAIN ONE
-# =========================
+    hmm = GaussianHMM(
+        n_components=2,
+        covariance_type="diag",
+        n_iter=50,
+        random_state=42
+    )
+
+    hmm.fit(returns)
+    return hmm
+
+# ----- TRAIN ONE --------------------------------------------------
 
 def train_one(ticker):
 
@@ -187,9 +170,6 @@ def train_one(ticker):
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.MSELoss()
 
-    # =========================
-    # TRAIN
-    # =========================
 
     for epoch in range(EPOCHS):
         model.train()
@@ -208,25 +188,17 @@ def train_one(ticker):
 
         print(f"{ticker} | epoch {epoch+1}/{EPOCHS} | loss={total_loss:.4f}")
 
-    # =========================
-    # GLOBAL METRICS (PER TICKER)
-    # =========================
-
     model.eval()
 
     with torch.no_grad():
         preds = model(torch.tensor(X_test, dtype=torch.float32).to(DEVICE)).cpu().numpy()
         true = y_test
-        
-    # =========================
-    # STRATEGY RETURNS
-    # =========================
     
     strategy_returns = (preds - true) / (np.abs(true) + 1e-8)
     market_returns = np.diff(true, axis=0)
     market_returns = np.pad(market_returns, ((1,0),(0,0)), mode="constant")
 
-    # store GLOBAL benchmark data
+    
     all_preds.append(preds)
     all_true.append(true)
     
@@ -237,7 +209,7 @@ def train_one(ticker):
     mae = mean_absolute_error(true, preds)
     r2 = r2_score(true, preds)
 
-    print("\n📊 METRICS TICKER")
+    print("\n METRICS TICKER")
     print(f"{ticker}")
     print(f"RMSE: {rmse:.4f}")
     print(f"MAE : {mae:.4f}")
@@ -249,7 +221,7 @@ def train_one(ticker):
     mdd    = max_drawdown(np.cumprod(1 + strat_flat))
     hit    = hit_rate(strat_flat)
     
-    print("\n📊 FINANCIAL METRICS")
+    print("\n FINANCIAL METRICS")
     print(f"Sharpe Ratio : {sharpe:.4f}")
     print(f"Max Drawdown : {mdd:.4f}")
     print(f"Hit Rate     : {hit:.4f}")
@@ -259,9 +231,7 @@ def train_one(ticker):
     return model, scaler, hmm
 
 
-# =========================
-# SAVE
-# =========================
+# ----- Sauvegarde ----------------------------------------------------
 
 def save(model, scaler, hmm, ticker):
 
@@ -276,9 +246,7 @@ def save(model, scaler, hmm, ticker):
         pickle.dump(hmm, f)
 
 
-# =========================
-# TRAIN ALL
-# =========================
+# ----- TRAIN ALL -----------------------------------------------------
 
 if __name__ == "__main__":
 
@@ -286,7 +254,7 @@ if __name__ == "__main__":
 
     for t in tickers:
 
-        print("\n📊", t)
+        print("\n", t)
 
         res = train_one(t)
 
@@ -295,11 +263,7 @@ if __name__ == "__main__":
 
         save(*res, t)
 
-        print("💾 Saved")
-
-    # =========================
-    # GLOBAL LIGHTGBM-STYLE METRICS
-    # =========================
+        print("Saved")
 
     all_preds = np.concatenate(all_preds, axis=0)
     all_true = np.concatenate(all_true, axis=0)
@@ -307,10 +271,6 @@ if __name__ == "__main__":
     rmse_global = np.sqrt(mean_squared_error(all_true, all_preds))
     mae_global = mean_absolute_error(all_true, all_preds)
     r2_global = r2_score(all_true, all_preds)
-    
-    # =========================
-    # 📊 GLOBAL FINANCIAL METRICS
-    # =========================
     
     all_strategy_returns = np.concatenate(all_strategy_returns)
     all_market_returns = np.concatenate(all_market_returns)
@@ -324,7 +284,7 @@ if __name__ == "__main__":
     hit_global = hit_rate(all_strategy_returns)
     
     print("\n==============================")
-    print("📊 GLOBAL STRATEGY PERFORMANCE")
+    print(" GLOBAL STRATEGY PERFORMANCE")
     print("==============================")
     print(f"Sharpe Ratio GLOBAL : {sharpe_global:.4f}")
     print(f"Max Drawdown GLOBAL : {mdd_global:.4f}")
@@ -332,11 +292,9 @@ if __name__ == "__main__":
     print("==============================")
 
     print("\n==============================")
-    print("📊 GLOBAL MODEL PERFORMANCE")
+    print(" GLOBAL MODEL PERFORMANCE")
     print("==============================")
     print(f"RMSE GLOBAL: {rmse_global:.4f}")
     print(f"MAE  GLOBAL: {mae_global:.4f}")
     print(f"R2   GLOBAL: {r2_global:.4f}")
     print("==============================")
-
-    print("✅ DONE")
